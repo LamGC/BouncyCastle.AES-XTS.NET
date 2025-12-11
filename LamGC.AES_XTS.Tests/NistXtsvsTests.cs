@@ -1,6 +1,6 @@
 using System.Collections;
 
-namespace LamGC.BouncyCastle.AES_XTS.Tests;
+namespace LamGC.AES_XTS.Tests;
 
 /// <summary>
 /// NIST XTSVS (XTS-AES Validation System) 测试.
@@ -20,8 +20,7 @@ public class NistXTSVSTests
         
         XtsAesCipherParameters parameters = new(XtsAesMode.Continuous, vector.Key1, vector.Key2, vector.DataUnitLength / 8, vector.SectorIndex);
 
-        var cipher = new XtsAesBufferedCipher();
-        cipher.Init(vector.IsEncrypt, parameters);
+        var cipher = new XtsAesBufferedCipher(vector.IsEncrypt, parameters);
 
         if (vector.IsEncrypt)
         {
@@ -44,8 +43,7 @@ public class NistXTSVSTests
         
         XtsAesCipherParameters parameters = new(XtsAesMode.Continuous, vector.Key1, vector.Key2, vector.DataUnitLength, vector.SectorIndex);
 
-        var cipher = new XtsAesBufferedCipher();
-        cipher.Init(vector.IsEncrypt, parameters);
+        var cipher = new XtsAesBufferedCipher(vector.IsEncrypt, parameters);
 
         if (vector.IsEncrypt)
         {
@@ -61,33 +59,54 @@ public class NistXTSVSTests
 
 public class NistXtsTestVector
 {
-    public required int Count { get; init; }
-    public required bool IsEncrypt { get; init; }
-    public required uint DataUnitLength { get; init; }
-    public required byte[] Key1 { get; init; }
-    public required byte[] Key2 { get; init; }
-    public required ulong SectorIndex { get; init; }
-    public required byte[] PlainText { get; init; }
-    public required byte[] CipherText { get; init; }
+    private int Count { get; }
+    public bool IsEncrypt { get; }
+    public uint DataUnitLength { get; }
+    public byte[] Key1 { get; }
+    public byte[] Key2 { get; }
+    public ulong SectorIndex { get; }
+    public byte[] PlainText { get; }
+    public byte[] CipherText { get; }
+    
+    public NistXtsTestVector(int count, bool isEncrypt, uint dataUnitLength, byte[] key1, byte[] key2, ulong sectorIndex, byte[] plainText, byte[] cipherText)
+    {
+        Count = count;
+        IsEncrypt = isEncrypt;
+        DataUnitLength = dataUnitLength;
+        Key1 = key1;
+        Key2 = key2;
+        SectorIndex = sectorIndex;
+        PlainText = plainText;
+        CipherText = cipherText;
+    }
     
     public override string ToString() => 
         $"Count: {Count}, Mode: {(IsEncrypt ? "Encrypt" : "Decrypt")}";
 }
 
-public class NistXtsTestVectorLoaderBase(string testVectorFilePath, int expectedKeySizeBits) : IEnumerable<object[]>
+public class NistXtsTestVectorLoaderBase : IEnumerable<object[]>
 {
+    private readonly string _testVectorFilePath;
+
+    private readonly int _expectedKeySizeBits;
+
+    protected NistXtsTestVectorLoaderBase(string testVectorFilePath, int expectedKeySizeBits)
+    {
+        _testVectorFilePath = testVectorFilePath;
+        _expectedKeySizeBits = expectedKeySizeBits;
+    }
     // 例如 128 或 256
 
     // 修改构造函数，增加 expectedKeySizeBits
 
     public IEnumerator<object[]> GetEnumerator()
     {
-        if (!File.Exists(testVectorFilePath))
+        if (!File.Exists(_testVectorFilePath))
         {
-            throw new FileNotFoundException("Test vector file not found", testVectorFilePath);
+            throw new FileNotFoundException("Test vector file not found", _testVectorFilePath);
         }
 
-        using var reader = new StreamReader(testVectorFilePath);
+        using var reader = new StreamReader(_testVectorFilePath);
 
         bool? currentIsEncrypt = null;
         
@@ -99,8 +118,7 @@ public class NistXtsTestVectorLoaderBase(string testVectorFilePath, int expected
         byte[]? pt = null;
         byte[]? ct = null;
 
-        string? line;
-        while ((line = reader.ReadLine()) != null)
+        while (reader.ReadLine() is { } line)
         {
             var cleanLine = HandleLine(line);
             if (string.IsNullOrEmpty(cleanLine)) continue;
@@ -122,10 +140,10 @@ public class NistXtsTestVectorLoaderBase(string testVectorFilePath, int expected
             {
                 if (count.HasValue && IsVectorReady(key1, sectorIndex, pt, ct))
                 {
-                    yield return
-                    [
+                    yield return new object[]
+                    {
                         CreateVector(currentIsEncrypt, count, dataUnitLen, key1, key2, sectorIndex, pt, ct)
-                    ];
+                    };
                 }
 
                 
@@ -144,12 +162,12 @@ public class NistXtsTestVectorLoaderBase(string testVectorFilePath, int expected
             else if (string.Equals(k, "Key", StringComparison.OrdinalIgnoreCase))
             {
                 var fullKey = Convert.FromHexString(v);
-                var expectedTotalBytes = expectedKeySizeBits / 8 * 2;
+                var expectedTotalBytes = _expectedKeySizeBits / 8 * 2;
                 if (fullKey.Length != expectedTotalBytes)
                 {
                     throw new InvalidDataException(
-                        $"Key length mismatch in file {testVectorFilePath}. " +
-                        $"Expected AES-{expectedKeySizeBits} (total {expectedTotalBytes} bytes), " +
+                        $"Key length mismatch in file {_testVectorFilePath}. " +
+                        $"Expected AES-{_expectedKeySizeBits} (total {expectedTotalBytes} bytes), " +
                         $"but got {fullKey.Length} bytes.");
                 }
                 
@@ -173,10 +191,10 @@ public class NistXtsTestVectorLoaderBase(string testVectorFilePath, int expected
 
         if (count.HasValue && IsVectorReady(key1, sectorIndex, pt, ct))
         {
-            yield return
-            [
+            yield return new object[]
+            {
                 CreateVector(currentIsEncrypt, count, dataUnitLen, key1, key2, sectorIndex, pt, ct)
-            ];
+            };
         }
     }
 
@@ -190,17 +208,15 @@ public class NistXtsTestVectorLoaderBase(string testVectorFilePath, int expected
     {
         if (isEncrypt == null) throw new InvalidDataException("Missing [ENCRYPT]/[DECRYPT] section header.");
         
-        return new NistXtsTestVector
-        {
-            Count = count!.Value,
-            IsEncrypt = isEncrypt.Value,
-            DataUnitLength = len ?? (uint)(pt!.Length * 8),
-            Key1 = k1!,
-            Key2 = k2!,
-            SectorIndex = seq!.Value,
-            PlainText = pt!,
-            CipherText = ct!
-        };
+        return new NistXtsTestVector(
+            count: count!.Value, 
+            isEncrypt: isEncrypt.Value,
+            dataUnitLength: len ?? (uint)(pt!.Length * 8), 
+            key1: k1!, 
+            key2: k2!, 
+            sectorIndex: seq!.Value,
+            plainText: pt!, 
+            cipherText: ct!);
     }
     
     private static string? HandleLine(string? line)
@@ -220,7 +236,18 @@ public class NistXtsTestVectorLoaderBase(string testVectorFilePath, int expected
     IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
 }
 
-public class NistXts128TestVectorLoader() : NistXtsTestVectorLoaderBase(Path.Combine("XTSTestVectors",
-    "format tweak value input - data unit seq no", "XTSGenAES128.rsp"), 128);
-public class NistXts256TestVectorLoader() : NistXtsTestVectorLoaderBase(Path.Combine("XTSTestVectors",
-    "format tweak value input - data unit seq no", "XTSGenAES256.rsp"), 256);
+public class NistXts128TestVectorLoader : NistXtsTestVectorLoaderBase
+{
+    public NistXts128TestVectorLoader() : base(Path.Combine("XTSTestVectors",
+        "format tweak value input - data unit seq no", "XTSGenAES128.rsp"), 128)
+    {
+    }
+}
+
+public class NistXts256TestVectorLoader : NistXtsTestVectorLoaderBase
+{
+    public NistXts256TestVectorLoader() : base(Path.Combine("XTSTestVectors",
+        "format tweak value input - data unit seq no", "XTSGenAES256.rsp"), 256)
+    {
+    }
+}

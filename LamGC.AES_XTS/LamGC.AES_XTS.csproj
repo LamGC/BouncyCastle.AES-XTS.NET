@@ -1,24 +1,19 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
     <PropertyGroup>
-        <TargetFramework>net9.0</TargetFramework>
-        <RootNamespace>LamGC.BouncyCastle.AES_XTS</RootNamespace>
+        <TargetFrameworks>net6.0;net7.0;net8.0;net10.0</TargetFrameworks>
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
         <IsPackable>true</IsPackable>
 
         <Version>0.1.0</Version>
-        <PackageId>LamGC.BouncyCastle.AES-XTS</PackageId>
+        <PackageId>LamGC.AES-XTS</PackageId>
         <Authors>LamGC</Authors>
         <Description>A streaming AES-XTS encryption implementation for the BouncyCastle Lightweight Cryptography API.</Description>
 
         <PackageLicenseExpression>MIT</PackageLicenseExpression>
-        <RepositoryUrl>https://github.com/LamGC/BouncyCastle.AES-XTS.NET</RepositoryUrl>
-        <PackageTags>crypto;aes;xts;bouncy-castle;</PackageTags>
+        <RepositoryUrl>https://github.com/LamGC/AES-XTS.NET</RepositoryUrl>
+        <PackageTags>crypto;aes;xts;</PackageTags>
     </PropertyGroup>
-
-    <ItemGroup>
-      <PackageReference Include="BouncyCastle.Cryptography" Version="2.6.2" />
-    </ItemGroup>
-
+    
 </Project>

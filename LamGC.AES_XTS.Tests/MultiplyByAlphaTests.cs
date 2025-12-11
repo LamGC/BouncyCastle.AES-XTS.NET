@@ -1,4 +1,4 @@
-namespace LamGC.BouncyCastle.AES_XTS.Tests;
+namespace LamGC.AES_XTS.Tests;
 
 /// <summary>
 /// GF(2^128) 乘以 α 运算测试.

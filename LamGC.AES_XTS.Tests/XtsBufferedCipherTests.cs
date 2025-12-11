@@ -1,17 +1,9 @@
-﻿using System;
-using System.IO;
-using System.Linq;
-using Org.BouncyCastle.Crypto;
-using Org.BouncyCastle.Crypto.Engines;
-using Org.BouncyCastle.Crypto.Parameters;
-using Xunit;
-
-namespace LamGC.BouncyCastle.AES_XTS.Tests;
+﻿namespace LamGC.AES_XTS.Tests;
 
 public class XtsAesBufferedCipherTests
 {
-    private readonly KeyParameter _key1 = new(new byte[16]);
-    private readonly KeyParameter _key2 = new(new byte[16]);
+    private readonly byte[] _key1 = new byte[16];
+    private readonly byte[] _key2 = new byte[16];
 
     private XtsAesCipherParameters CreateParams(
         XtsAesMode mode, 
@@ -26,15 +18,15 @@ public class XtsAesBufferedCipherTests
     [Fact]
     public void AlgorithmName_ShouldBeCorrect()
     {
-        var cipher = new XtsAesBufferedCipher();
+        var cipher = new XtsAesBufferedCipher(true, CreateParams(XtsAesMode.Continuous));
         Assert.Equal("AES/XTS", cipher.AlgorithmName);
     }
     
     [Fact]
     public void GetBlockSize_ShouldEqualAesBlockSize()
     {
-        var cipher = new XtsAesBufferedCipher();
-        Assert.Equal(new AesEngine().GetBlockSize(), cipher.GetBlockSize());
+        var cipher = new XtsAesBufferedCipher(true, CreateParams(XtsAesMode.Continuous));
+        Assert.Equal(16, cipher.GetBlockSize());
     }
     
     #endregion
@@ -44,12 +36,6 @@ public class XtsAesBufferedCipherTests
     [Fact]
     public void Init_WithInvalidParameters_ShouldThrow()
     {
-        var cipher = new XtsAesBufferedCipher();
-        
-        // 1. 参数类型错误
-        Assert.Throws<ArgumentException>(() => 
-            cipher.Init(true, new KeyParameter(new byte[16])));
-        
         Assert.Throws<ArgumentException>(() => 
             CreateParams(XtsAesMode.Continuous, 15));
 
@@ -62,19 +48,18 @@ public class XtsAesBufferedCipherTests
         
         Assert.NotNull(sectorSizeSetter);
         
-        sectorSizeSetter.Invoke(invalidParameters, [15UL]);
+        sectorSizeSetter.Invoke(invalidParameters, new object[] { 15UL });
         
         Assert.Equal(15UL, invalidParameters.SectorSize);
         
         Assert.Throws<ArgumentException>(() => 
-            cipher.Init(true, invalidParameters));
+            new XtsAesBufferedCipher(true, invalidParameters));
     }
 
     [Fact]
     public void Lifecycle_Dispose_ShouldPreventUsage()
     {
-        var cipher = new XtsAesBufferedCipher();
-        cipher.Init(true, CreateParams(XtsAesMode.Continuous));
+        var cipher = new XtsAesBufferedCipher(true, CreateParams(XtsAesMode.Continuous));
         
         cipher.Dispose();
 
@@ -88,9 +73,8 @@ public class XtsAesBufferedCipherTests
     [Fact]
     public void Reset_ShouldClearBufferAndCounters()
     {
-        var cipher = new XtsAesBufferedCipher();
         // 使用 Independent 模式测试, 因为该模式有内部计数器需要重置
-        cipher.Init(true, CreateParams(XtsAesMode.Independent, 32));
+        var cipher = new XtsAesBufferedCipher(true, CreateParams(XtsAesMode.Independent, 32));
 
         // 1. 填入 10 字节数据 (进入 Buffer)
         cipher.ProcessBytes(new byte[10]); 
@@ -114,12 +98,11 @@ public class XtsAesBufferedCipherTests
     [Fact]
     public void DoFinal_ShouldAutoResetAfterExecute()
     {
-        var cipher = new XtsAesBufferedCipher();
-        cipher.Init(true, CreateParams(XtsAesMode.Continuous, 32));
+        var cipher = new XtsAesBufferedCipher(true, CreateParams(XtsAesMode.Continuous, 32));
         
         Assert.Equal(0, cipher.GetOutputSize(0));
         
-        cipher.DoFinal([], 0);
+        cipher.DoFinal(Array.Empty<byte>(), 0);
         Assert.Equal(0, cipher.GetOutputSize(0));
         
         cipher.DoFinal(new byte[32], 0);
@@ -137,8 +120,7 @@ public class XtsAesBufferedCipherTests
     [Fact]
     public void IndependentMode_ExactSectorSize_ShouldSucceed()
     {
-        var cipher = new XtsAesBufferedCipher();
-        cipher.Init(true, CreateParams(XtsAesMode.Independent, 32)); // 32 bytes
+        var cipher = new XtsAesBufferedCipher(true, CreateParams(XtsAesMode.Independent, 32));
 
         // 分两次输入, 验证累加逻辑
         cipher.ProcessBytes(new byte[16]);
@@ -150,8 +132,7 @@ public class XtsAesBufferedCipherTests
     [Fact]
     public void IndependentMode_ExceedingLimit_ShouldThrow_Immediately()
     {
-        var cipher = new XtsAesBufferedCipher();
-        cipher.Init(true, CreateParams(XtsAesMode.Independent, 32));
+        var cipher = new XtsAesBufferedCipher(true, CreateParams(XtsAesMode.Independent, 32));
 
         // 1. 输入 32 字节 (占满)
         cipher.ProcessBytes(new byte[32]);
@@ -161,7 +142,7 @@ public class XtsAesBufferedCipherTests
             cipher.ProcessByte(0));
         
         var ex2 = Assert.Throws<InvalidOperationException>(() => 
-            cipher.ProcessBytes([0]));
+            cipher.ProcessBytes(new byte[] { 0 }));
         
         Assert.Contains("cannot exceed the specified sector size", ex.Message);
         Assert.Contains("cannot exceed the specified sector size", ex2.Message);
@@ -170,8 +151,7 @@ public class XtsAesBufferedCipherTests
     [Fact]
     public void IndependentMode_GetOutputSize_ShouldCheckLimit()
     {
-        var cipher = new XtsAesBufferedCipher();
-        cipher.Init(true, CreateParams(XtsAesMode.Independent, 32));
+        var cipher = new XtsAesBufferedCipher(true, CreateParams(XtsAesMode.Independent, 32));
 
         cipher.ProcessBytes(new byte[20]); // 已处理 20
 
@@ -208,13 +188,12 @@ public class XtsAesBufferedCipherTests
     [Fact]
     public void DataUnit_LessThan16Bytes_ShouldThrow()
     {
-        var cipher = new XtsAesBufferedCipher();
-        cipher.Init(true, CreateParams(XtsAesMode.Continuous));
+        var cipher = new XtsAesBufferedCipher(true, CreateParams(XtsAesMode.Continuous));
 
         var input = new byte[15]; 
         
         // XTS 根本不支持 < 16 字节
-        Assert.Throws<DataLengthException>(() => cipher.DoFinal(input));
+        Assert.Throws<ArgumentException>(() => cipher.DoFinal(input));
     }
 
     [Fact]
@@ -229,13 +208,12 @@ public class XtsAesBufferedCipherTests
         // Buffer 需要做 CTS: 前 16 字节是 Sector 0, Block 1。后 1 字节是 Sector 1, Block 0。
         // 这是跨扇区的 CTS, 必须被禁止。
 
-        var cipher = new XtsAesBufferedCipher();
-        cipher.Init(true, CreateParams(XtsAesMode.Continuous, 32));
+        var cipher = new XtsAesBufferedCipher(true, CreateParams(XtsAesMode.Continuous, 32));
 
         var input = new byte[33]; 
         
         // 应该抛出 DataLengthException, 提示 CTS 跨扇区
-        var ex = Assert.Throws<DataLengthException>(() => cipher.DoFinal(input));
+        var ex = Assert.Throws<ArgumentException>(() => cipher.DoFinal(input));
         Assert.Contains("Invalid data state for DoFinal at a sector boundary.", ex.Message);
     }
     
@@ -244,20 +222,18 @@ public class XtsAesBufferedCipherTests
     {
         // 验证正常的扇区切换 (非 CTS 跨越)
         // SectorSize = 32. 输入 64 字节 (正好 2 个扇区)
-        
-        var cipher = new XtsAesBufferedCipher();
-        cipher.Init(true, CreateParams(XtsAesMode.Continuous, 32));
 
         var input = new byte[64];
         // 填充一些数据防止全0
         for(var i=0; i<64; i++) input[i] = (byte)i;
 
-        var output = cipher.DoFinal(input);
+        var encryptCipher = new XtsAesBufferedCipher(true, CreateParams(XtsAesMode.Continuous, 32));
+        var output = encryptCipher.DoFinal(input);
         Assert.Equal(64, output.Length);
 
         // 验证解密
-        cipher.Init(false, CreateParams(XtsAesMode.Continuous, 32));
-        var decrypted = cipher.DoFinal(output);
+        var decryptCipher = new XtsAesBufferedCipher(false, CreateParams(XtsAesMode.Continuous, 32));
+        var decrypted = decryptCipher.DoFinal(output);
         Assert.Equal(input, decrypted);
     }
 
@@ -268,17 +244,15 @@ public class XtsAesBufferedCipherTests
     [Fact]
     public void Buffer_Fragmentation_ByteByByte_ShouldMatchAllAtOnce()
     {
-        var cipher = new XtsAesBufferedCipher();
         var parms = CreateParams(XtsAesMode.Continuous);
+        var cipher = new XtsAesBufferedCipher(true, parms);
         var input = new byte[100];
         Random.Shared.NextBytes(input);
 
-        // 1. 一次性处理
-        cipher.Init(true, parms);
         var expected = cipher.DoFinal(input);
 
         // 2. 逐字节处理
-        cipher.Init(true, parms);
+        cipher.Reset();
         using var ms = new MemoryStream();
         foreach (var b in input)
         {
@@ -294,17 +268,16 @@ public class XtsAesBufferedCipherTests
     [Fact]
     public void Buffer_Fragmentation_RandomChunks_ShouldMatch()
     {
-        var cipher = new XtsAesBufferedCipher();
         var parms = CreateParams(XtsAesMode.Continuous);
+        var cipher = new XtsAesBufferedCipher(true, parms);
         var input = new byte[500];
         Random.Shared.NextBytes(input);
 
         // 1. 一次性
-        cipher.Init(true, parms);
         var expected = cipher.DoFinal(input);
 
         // 2. 随机大小 Chunk
-        cipher.Init(true, parms);
+        cipher.Reset();
         using var ms = new MemoryStream();
         var offset = 0;
         var rng = new Random(123);
@@ -332,8 +305,7 @@ public class XtsAesBufferedCipherTests
     [Fact]
     public void GetUpdateOutputSize_BufferBoundary_ShouldRespect31ByteLimit()
     {
-        var cipher = new XtsAesBufferedCipher();
-        cipher.Init(true, CreateParams(XtsAesMode.Continuous));
+        var cipher = new XtsAesBufferedCipher(true, CreateParams(XtsAesMode.Continuous));
 
         // 场景 1: 输入 16 字节 (1个块)
         // 行为: 16 <= 31, 全部缓存, 不输出
@@ -356,8 +328,7 @@ public class XtsAesBufferedCipherTests
     [Fact]
     public void GetOutputSize_IntOverflow_ShouldThrow()
     {
-        var cipher = new XtsAesBufferedCipher();
-        cipher.Init(true, CreateParams(XtsAesMode.Continuous));
+        var cipher = new XtsAesBufferedCipher(true, CreateParams(XtsAesMode.Continuous));
 
         // 1. 填充 Buffer
         // 这里传入 31 字节可以直接填满 UnhandledBuffer, 因为如果不继续填充数据, 那么 Cipher 就会一直 Pending 这两个块.
@@ -375,8 +346,7 @@ public class XtsAesBufferedCipherTests
     [Fact]
     public void GetOutputSizeExact_ShouldHandleLargeValues()
     {
-        var cipher = new XtsAesBufferedCipher();
-        cipher.Init(true, CreateParams(XtsAesMode.Continuous));
+        var cipher = new XtsAesBufferedCipher(true, CreateParams(XtsAesMode.Continuous));
         
         cipher.ProcessBytes(new byte[16]); // Buffer = 16
 
@@ -393,8 +363,7 @@ public class XtsAesBufferedCipherTests
     [Fact]
     public void GetOutputSize_AfterReset_ShouldBeZeroBase()
     {
-        var cipher = new XtsAesBufferedCipher();
-        cipher.Init(true, CreateParams(XtsAesMode.Continuous));
+        var cipher = new XtsAesBufferedCipher(true, CreateParams(XtsAesMode.Continuous));
 
         cipher.ProcessBytes(new byte[10]);
         // Reset 前, 预测值包含 Buffer
@@ -412,8 +381,7 @@ public class XtsAesBufferedCipherTests
     [Fact]
     public void ProcessBytes_WithOffsetAndLength_ShouldProcessCorrectly()
     {
-        var cipher = new XtsAesBufferedCipher();
-        cipher.Init(true, CreateParams(XtsAesMode.Continuous));
+        var cipher = new XtsAesBufferedCipher(true, CreateParams(XtsAesMode.Continuous));
 
         // 构造一个包含 "干扰数据" 的数组
         var largeBuffer = new byte[100];
@@ -436,9 +404,9 @@ public class XtsAesBufferedCipherTests
         Assert.Equal(16, output2.Length);
 
         // 验证解密回来的数据是否等于 validData
-        cipher.Init(false, CreateParams(XtsAesMode.Continuous));
+        var decryptCipher = new XtsAesBufferedCipher(false, CreateParams(XtsAesMode.Continuous));
         var fullOutput = output1.Concat(output2).ToArray();
-        var decrypted = cipher.DoFinal(fullOutput);
+        var decrypted = decryptCipher.DoFinal(fullOutput);
         
         Assert.Equal(validData, decrypted);
     }
@@ -446,8 +414,7 @@ public class XtsAesBufferedCipherTests
     [Fact]
     public void ProcessBytes_ToOutputBuffer_ShouldWriteAtOffset()
     {
-        var cipher = new XtsAesBufferedCipher();
-        cipher.Init(true, CreateParams(XtsAesMode.Continuous));
+        var cipher = new XtsAesBufferedCipher(true, CreateParams(XtsAesMode.Continuous));
 
         var input = new byte[32]; // 2 blocks
         var outputBuffer = new byte[100]; // 大 buffer
@@ -468,8 +435,7 @@ public class XtsAesBufferedCipherTests
     [Fact]
     public void DoFinal_ToOutputBuffer_ShouldWriteAtOffset()
     {
-        var cipher = new XtsAesBufferedCipher();
-        cipher.Init(true, CreateParams(XtsAesMode.Continuous));
+        var cipher = new XtsAesBufferedCipher(true, CreateParams(XtsAesMode.Continuous));
 
         // 先放入 32 字节
         cipher.ProcessBytes(new byte[32]); // 此时 Buffer 有 16 字节, 已输出 16 字节(假设用的是返回数组的方法)
@@ -493,8 +459,7 @@ public class XtsAesBufferedCipherTests
     [Fact]
     public void ProcessByte_ToOutputBuffer_ShouldAccumulateAndWrite()
     {
-        var cipher = new XtsAesBufferedCipher();
-        cipher.Init(true, CreateParams(XtsAesMode.Continuous));
+        var cipher = new XtsAesBufferedCipher(true, CreateParams(XtsAesMode.Continuous));
 
         var outputBuffer = new byte[32];
         var bytesWritten = 0;
@@ -518,8 +483,7 @@ public class XtsAesBufferedCipherTests
     public void DoFinal_WithInputAndOutputBuffer_ShouldHandleEverything()
     {
         // 测试 DoFinal(input, inOff, len, output, outOff) 这个最全参数的版本
-        var cipher = new XtsAesBufferedCipher();
-        cipher.Init(true, CreateParams(XtsAesMode.Continuous));
+        var cipher = new XtsAesBufferedCipher(true, CreateParams(XtsAesMode.Continuous));
 
         var input = new byte[20]; // 16 + 4
         var output = new byte[20];
@@ -534,8 +498,7 @@ public class XtsAesBufferedCipherTests
     public void IndependentMode_ProcessBytesWithOffset_ShouldCountCorrectly()
     {
         // 验证 Offset 版本的 ProcessBytes 是否也正确出发了 Independent 计数器检查
-        var cipher = new XtsAesBufferedCipher();
-        cipher.Init(true, CreateParams(XtsAesMode.Independent, 32));
+        var cipher = new XtsAesBufferedCipher(true, CreateParams(XtsAesMode.Independent, 32));
 
         var buffer = new byte[100]; // 大 buffer
 
@@ -558,8 +521,7 @@ public class XtsAesBufferedCipherTests
     [InlineData(48)] // 正好 3 块
     public void GetOutputSize_ShouldMatchDoFinalOutputLength(int inputLength)
     {
-        var cipher = new XtsAesBufferedCipher();
-        cipher.Init(true, CreateParams(XtsAesMode.Continuous));
+        var cipher = new XtsAesBufferedCipher(true, CreateParams(XtsAesMode.Continuous));
 
         // 1. 预测
         var predictedSize = cipher.GetOutputSize(inputLength);
@@ -580,8 +542,7 @@ public class XtsAesBufferedCipherTests
     [InlineData(48)] // 输入 48 -> 应该处理 32, 缓存 16
     public void GetUpdateOutputSize_ShouldMatchProcessBytesOutputLength(int inputLength)
     {
-        var cipher = new XtsAesBufferedCipher();
-        cipher.Init(true, CreateParams(XtsAesMode.Continuous));
+        var cipher = new XtsAesBufferedCipher(true, CreateParams(XtsAesMode.Continuous));
 
         // 1. 预测 Update 输出
         var predictedUpdateSize = cipher.GetUpdateOutputSize(inputLength);
@@ -600,8 +561,7 @@ public class XtsAesBufferedCipherTests
     [Fact]
     public void GetOutputSize_WithExistingBuffer_ShouldMatchActual()
     {
-        var cipher = new XtsAesBufferedCipher();
-        cipher.Init(true, CreateParams(XtsAesMode.Continuous));
+        var cipher = new XtsAesBufferedCipher(true, CreateParams(XtsAesMode.Continuous));
 
         // 先填充 10 字节 Buffer
         cipher.ProcessBytes(new byte[10]);
@@ -619,8 +579,7 @@ public class XtsAesBufferedCipherTests
     [Fact]
     public void GetUpdateOutputSize_WithExistingBuffer_ShouldMatchActual()
     {
-        var cipher = new XtsAesBufferedCipher();
-        cipher.Init(true, CreateParams(XtsAesMode.Continuous));
+        var cipher = new XtsAesBufferedCipher(true, CreateParams(XtsAesMode.Continuous));
 
         // 先填充 10 字节
         cipher.ProcessBytes(new byte[10]);
@@ -641,8 +600,7 @@ public class XtsAesBufferedCipherTests
     public void GetOutputSize_IndependentMode_ShouldMatchLimitCheck()
     {
         // 这个测试验证 Independent 模式下的预测是否也符合实际
-        var cipher = new XtsAesBufferedCipher();
-        cipher.Init(true, CreateParams(XtsAesMode.Independent, 32));
+        var cipher = new XtsAesBufferedCipher(true, CreateParams(XtsAesMode.Independent, 32));
 
         // 预测输入 32 字节
         var predicted = cipher.GetOutputSize(32);
@@ -662,8 +620,7 @@ public class XtsAesBufferedCipherTests
     public void DoFinal_ProvidedShorterOutputBuf_ShouldThrows()
     {
         // 这个测试验证 Independent 模式下的预测是否也符合实际
-        var cipher = new XtsAesBufferedCipher();
-        cipher.Init(true, CreateParams(XtsAesMode.Independent, 32));
+        var cipher = new XtsAesBufferedCipher(true, CreateParams(XtsAesMode.Independent, 32));
 
         // 同时输入和输出的情况.
         // 预测输入 32 字节
@@ -688,8 +645,7 @@ public class XtsAesBufferedCipherTests
     public void ProcessBytes_ProvidedShorterOutputBuf_ShouldThrows()
     {
         // 这个测试验证 Independent 模式下的预测是否也符合实际
-        var cipher = new XtsAesBufferedCipher();
-        cipher.Init(true, CreateParams(XtsAesMode.Independent, 32));
+        var cipher = new XtsAesBufferedCipher(true, CreateParams(XtsAesMode.Independent, 32));
 
         // 同时输入和输出的情况.
         // 预测输入 32 字节
@@ -704,8 +660,7 @@ public class XtsAesBufferedCipherTests
     [Fact]
     public void CheckInput_ProvidedWrongInputArgs_ShouldThrows()
     {
-        var cipher = new XtsAesBufferedCipher();
-        cipher.Init(true, CreateParams(XtsAesMode.Independent, 32));
+        var cipher = new XtsAesBufferedCipher(true, CreateParams(XtsAesMode.Independent, 32));
 
         var input = new byte[32];
 
@@ -716,8 +671,7 @@ public class XtsAesBufferedCipherTests
     [Fact]
     public void ContinuousMode_DoFinal_ExecuteOnInputOutOfSectorSize_ShouldThrows()
     {
-        var cipher = new XtsAesBufferedCipher();
-        cipher.Init(true, CreateParams(XtsAesMode.Continuous, 32));
+        var cipher = new XtsAesBufferedCipher(true, CreateParams(XtsAesMode.Continuous, 32));
 
         // 此时填入数据使得 UnhandledBuffer 出现跨扇区.
         cipher.ProcessBytes(new byte[33]);
@@ -725,15 +679,14 @@ public class XtsAesBufferedCipherTests
         // 再次尝试无输入的情况.
         var predictedOutLen = cipher.GetOutputSize(0);
         // 实际执行
-        var ex = Assert.Throws<DataLengthException>(() => cipher.DoFinal([0], new byte[predictedOutLen].AsSpan()));
+        var ex = Assert.Throws<ArgumentException>(() => cipher.DoFinal(new byte[] { 0 }, new byte[predictedOutLen].AsSpan()));
         Assert.Contains("Invalid data state for DoFinal at a sector boundary.", ex.Message);
     }
     
     [Fact]
     public void IndependentMode_ProcessBytes_ExecuteOnInputOutOfSectorSize_ShouldThrows()
     {
-        var cipher = new XtsAesBufferedCipher();
-        cipher.Init(true, CreateParams(XtsAesMode.Independent, 32));
+        var cipher = new XtsAesBufferedCipher(true, CreateParams(XtsAesMode.Independent, 32));
 
         // 实际执行
         var ex = Assert.Throws<InvalidOperationException>(() => cipher.ProcessBytes(new byte[33]));
@@ -754,8 +707,7 @@ public class XtsAesBufferedCipherTests
     [Fact]
     public void IndependentMode_ProcessByte_ExecuteOnInputOutOfSectorSize_ShouldThrows()
     {
-        var cipher = new XtsAesBufferedCipher();
-        cipher.Init(true, CreateParams(XtsAesMode.Independent, 32));
+        var cipher = new XtsAesBufferedCipher(true, CreateParams(XtsAesMode.Independent, 32));
 
         cipher.ProcessBytes(new byte[32]);
         var ex = Assert.Throws<InvalidOperationException>(() => cipher.ProcessByte(0));
@@ -766,22 +718,12 @@ public class XtsAesBufferedCipherTests
         var ex2 = Assert.Throws<InvalidOperationException>(() => cipher.ProcessByte(0, new byte[32], 0));
         Assert.Contains("cannot exceed the specified sector size", ex2.Message);
     }
-
-    [Fact]
-    public void CipherReset_BeforeInit_ShouldThrows()
-    {
-        var cipher = new XtsAesBufferedCipher();
-
-        var ex = Assert.Throws<InvalidOperationException>(() => cipher.Reset());
-        Assert.Contains("must be initialized", ex.Message);
-    }
     
     [Fact]
     public void DoFinal_ExecuteOnEmptyUnhandledBuffer_ShouldReturnEmpty()
     {
         // 这个测试验证 Independent 模式下的预测是否也符合实际
-        var cipher = new XtsAesBufferedCipher();
-        cipher.Init(true, CreateParams(XtsAesMode.Independent, 32));
+        var cipher = new XtsAesBufferedCipher(true, CreateParams(XtsAesMode.Independent, 32));
 
         // 在没有输入任何数据的情况下直接 DoFinal, 由于 UnhandledBuffer 什么数据都没有, 因此 DoFinal 应直接返回空数组.
 
@@ -804,7 +746,6 @@ public class XtsAesBufferedCipherTests
 
     private void VerifyRoundTrip(int length, XtsAesMode mode)
     {
-        var cipher = new XtsAesBufferedCipher();
         // 使用大 SectorSize 避免测试 CTS 跨扇区问题, 专注测试加解密互逆
         var parms = CreateParams(mode, 4096); 
 
@@ -812,13 +753,13 @@ public class XtsAesBufferedCipherTests
         for (var i = 0; i < length; i++) plainText[i] = (byte)(i % 255);
 
         // Encrypt
-        cipher.Init(true, parms);
-        var cipherText = cipher.DoFinal(plainText);
+        var encryptCipher = new XtsAesBufferedCipher(true, parms);
+        var cipherText = encryptCipher.DoFinal(plainText);
         Assert.Equal(length, cipherText.Length);
 
         // Decrypt
-        cipher.Init(false, parms);
-        var recovered = cipher.DoFinal(cipherText);
+        var decryptCipher = new XtsAesBufferedCipher(false, parms);
+        var recovered = decryptCipher.DoFinal(cipherText);
 
         Assert.Equal(plainText, recovered);
     }

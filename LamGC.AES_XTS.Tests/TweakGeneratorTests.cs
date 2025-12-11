@@ -1,7 +1,4 @@
-using Xunit;
-using Org.BouncyCastle.Crypto.Parameters;
-
-namespace LamGC.BouncyCastle.AES_XTS.Tests;
+namespace LamGC.AES_XTS.Tests;
 
 public class XtsTweakMathTests
 {
@@ -56,7 +53,7 @@ public class XtsTweakMathTests
 
 public class XtsTweakGeneratorTests
 {
-    private readonly KeyParameter _dummyKey = new KeyParameter(new byte[32]); // 256-bit key
+    private readonly byte[] _dummyKey = new byte[32]; // 256-bit key
 
     [Fact]
     public void CalculateTweak_BelowAndAboveThreshold_ShouldBeConsistent()
@@ -93,7 +90,7 @@ public class XtsTweakGeneratorTests
 
 public class XtsTweakStatefulGeneratorTests
 {
-    private readonly KeyParameter _dummyKey = new KeyParameter(new byte[32]);
+    private readonly byte[] _dummyKey = new byte[32];
 
     [Fact]
     public void Sequence_ShouldMatchStatelessGenerator()

@@ -1,10 +1,10 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LamGC.BouncyCastle.AES_XTS", "LamGC.BouncyCastle.AES_XTS\LamGC.BouncyCastle.AES_XTS.csproj", "{47464EFC-C125-44F9-B812-2720D81DADB3}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LamGC.AES_XTS", "LamGC.AES_XTS\LamGC.AES_XTS.csproj", "{47464EFC-C125-44F9-B812-2720D81DADB3}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LamGC.BouncyCastle.AES_XTS.Tests", "LamGC.BouncyCastle.AES_XTS.Tests\LamGC.BouncyCastle.AES_XTS.Tests.csproj", "{B07461E3-D817-4CAD-A97D-69C04B21C5C4}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LamGC.AES_XTS.Tests", "LamGC.AES_XTS.Tests\LamGC.AES_XTS.Tests.csproj", "{B07461E3-D817-4CAD-A97D-69C04B21C5C4}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LamGC.BouncyCastle.AES_XTS.Benchmarks", "LamGC.BouncyCastle.AES_XTS.Benchmarks\LamGC.BouncyCastle.AES_XTS.Benchmarks.csproj", "{FE4C31E2-13AA-4B70-9DE8-8FAF00399F12}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LamGC.AES_XTS.Benchmarks", "LamGC.AES_XTS.Benchmarks\LamGC.AES_XTS.Benchmarks.csproj", "{FE4C31E2-13AA-4B70-9DE8-8FAF00399F12}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
