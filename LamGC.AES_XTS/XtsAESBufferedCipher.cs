@@ -6,13 +6,12 @@ namespace LamGC.AES_XTS
 {
     public class XtsAesBufferedCipher : IDisposable
     {
-
         public const int AesBlockSize = 16;
 
         private readonly bool _forEncryption;
         private XtsAesMode _mode;
         private readonly Aes _dataEncEngine = Aes.Create();
-        
+
         private XtsAesCipherParameters? _parameters;
         private XtsTweakStatefulGenerator _tweakGenerator = null!;
 
@@ -25,6 +24,7 @@ namespace LamGC.AES_XTS
         private ulong TotalBlockCountInSector => (SectorSize + AesBlockSize - 1) / AesBlockSize;
 
         private readonly byte[] _unhandledBuffer = new byte[31 /* AesBlockSize * 2 - 1 */];
+
         /// <summary>
         /// 当前已存储的未处理字节数.
         /// </summary>
@@ -35,11 +35,11 @@ namespace LamGC.AES_XTS
 #else
         private ulong _totalBytesProcessedInCurrentSector;
 #endif
-    
+
         public XtsAesBufferedCipher(bool forEncryption, XtsAesCipherParameters parameters)
         {
             CheckParameters(parameters);
-        
+
             _parameters = parameters;
             _forEncryption = forEncryption;
             Reset(true);
@@ -52,7 +52,7 @@ namespace LamGC.AES_XTS
                 throw new ArgumentException("The sector size must be greater than or equal to 16 bytes.");
             }
         }
-    
+
         public void Reset()
         {
             CheckState();
@@ -74,7 +74,8 @@ namespace LamGC.AES_XTS
                 _dataEncEngine.Mode = CipherMode.ECB;
                 _dataEncEngine.Padding = PaddingMode.None;
 
-                _tweakGenerator = new XtsTweakStatefulGenerator(_parameters.Key2, _parameters.SectorSize, _parameters.SectorIndex);
+                _tweakGenerator =
+                    new XtsTweakStatefulGenerator(_parameters.Key2, _parameters.SectorSize, _parameters.SectorIndex);
             }
 
             _tweakGenerator.Reset(_parameters.SectorSize, _parameters.SectorIndex);
@@ -101,10 +102,10 @@ namespace LamGC.AES_XTS
         {
             XtsParameterValidators.ThrowIfNegative(inputLen);
             CheckState();
-        
+
             if (_mode == XtsAesMode.Independent)
             {
-                var totalDataForSector = 
+                var totalDataForSector =
                     _totalBytesProcessedInCurrentSector + (ulong)inputLen;
 
                 if (totalDataForSector > SectorSize)
@@ -114,8 +115,8 @@ namespace LamGC.AES_XTS
                         $"({totalDataForSector} bytes) cannot exceed the specified sector size ({SectorSize} bytes).");
                 }
             }
-        
-            var outputSize = (long) _unhandledBufferLength + inputLen;
+
+            var outputSize = (long)_unhandledBufferLength + inputLen;
             if (outputSize > int.MaxValue)
             {
                 throw new InvalidOperationException("Input data is too large for the IBufferedCipher API.");
@@ -123,14 +124,14 @@ namespace LamGC.AES_XTS
 
             return (int)outputSize;
         }
-    
+
         public ulong GetOutputSizeExact(ulong inputLen)
         {
             CheckState();
-        
+
             if (_mode == XtsAesMode.Independent)
             {
-                var totalDataForSector = 
+                var totalDataForSector =
                     _totalBytesProcessedInCurrentSector + inputLen;
 
                 if (totalDataForSector > SectorSize)
@@ -140,18 +141,18 @@ namespace LamGC.AES_XTS
                         $"({totalDataForSector} bytes) cannot exceed the specified sector size ({SectorSize} bytes).");
                 }
             }
-        
-            return inputLen + (ulong) _unhandledBufferLength;
+
+            return inputLen + (ulong)_unhandledBufferLength;
         }
 
         public int GetUpdateOutputSize(int inputLen)
         {
             XtsParameterValidators.ThrowIfNegative(inputLen);
             CheckState();
-        
+
             if (_mode == XtsAesMode.Independent)
             {
-                var totalDataForSector = 
+                var totalDataForSector =
                     _totalBytesProcessedInCurrentSector + (ulong)inputLen;
 
                 if (totalDataForSector > SectorSize)
@@ -165,24 +166,24 @@ namespace LamGC.AES_XTS
             var totalData = (long)_unhandledBufferLength + inputLen;
             var totalBlocks = totalData / 16;
             var blocksToProcess = totalBlocks > 0 ? totalBlocks - 1 : 0;
-        
+
             var outputSize = blocksToProcess * 16;
 
             if (outputSize > int.MaxValue)
             {
                 throw new InvalidOperationException("SectorSize is too large for the IBufferedCipher API.");
             }
-        
-            return (int)outputSize; 
+
+            return (int)outputSize;
         }
 
         public ulong GetUpdateOutputSizeExact(ulong inputLen)
         {
             CheckState();
-        
+
             if (_mode == XtsAesMode.Independent)
             {
-                var totalDataForSector = 
+                var totalDataForSector =
                     _totalBytesProcessedInCurrentSector + inputLen;
 
                 if (totalDataForSector > SectorSize)
@@ -192,34 +193,30 @@ namespace LamGC.AES_XTS
                         $"({totalDataForSector} bytes) cannot exceed the specified sector size ({SectorSize} bytes).");
                 }
             }
-        
+
             var totalData = (ulong)_unhandledBufferLength + inputLen;
             var totalBlocks = totalData / 16;
             var blocksToProcess = totalBlocks > 0 ? totalBlocks - 1 : 0;
 
             return blocksToProcess * 16;
         }
-    
+
         /// <summary>
         /// 根据 forEncryption 来执行 AES 操作.
         /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private void ProcessAesBlock(ReadOnlySpan<byte> input, Span<byte> output)
         {
-#if NET6_0_OR_GREATER
-        if (_forEncryption)
-        {
-            _dataEncEngine.EncryptEcb(input, output, PaddingMode.None);
+            if (_forEncryption)
+            {
+                _dataEncEngine.TryEncryptEcb(input, output, PaddingMode.None, out _);
+            }
+            else
+            {
+                _dataEncEngine.TryDecryptEcb(input, output, PaddingMode.None, out _);
+            }
         }
-        else
-        {
-            _dataEncEngine.DecryptEcb(input, output, PaddingMode.None);
-        }
-#else
-            _cipher.TransformBlockSpan(input, output);
-#endif
-        }
-    
+
         /// <summary>
         /// 对传入的数据执行加解密操作.
         /// </summary>
@@ -230,7 +227,7 @@ namespace LamGC.AES_XTS
         {
             if (_mode == XtsAesMode.Independent)
             {
-                var totalDataForSector = 
+                var totalDataForSector =
                     _totalBytesProcessedInCurrentSector + (ulong)input.Length;
 
                 if (totalDataForSector > SectorSize)
@@ -241,10 +238,10 @@ namespace LamGC.AES_XTS
                         $"({totalDataForSector} bytes) cannot exceed the specified sector size ({SectorSize} bytes). " +
                         $"({_totalBytesProcessedInCurrentSector} bytes already processed, {_unhandledBufferLength} bytes buffered).");
                 }
-            
+
                 _totalBytesProcessedInCurrentSector += (ulong)input.Length;
             }
-        
+
             if (input.Length + _unhandledBufferLength <= _unhandledBuffer.Length)
             {
                 input.CopyTo(_unhandledBuffer.AsSpan()[_unhandledBufferLength..]);
@@ -253,57 +250,74 @@ namespace LamGC.AES_XTS
             }
 
             var actualInputLength = _unhandledBufferLength + input.Length;
-            var actualInput = actualInputLength < 1024 ? stackalloc byte[actualInputLength] : new byte[actualInputLength];
-        
+
+            var handleBlockCount = Math.Max(0, actualInputLength / 16 - 1);
+            var requiredSpace = handleBlockCount * 16;
+            if (output.Length < requiredSpace)
+            {
+                throw new ArgumentException(
+                    $"The provided output array has an insufficient length (required: {handleBlockCount * 16}, actual: {output.Length})",
+                    nameof(output));
+            }
+
+            Span<byte> inputBlock = stackalloc byte[16];
+
+            // 当 inputBufOffset 为正数时, 表示还能从 _unhandledBufferLength 获取的数据.
+            // 当 inputBufOffset 为负数时, 表示需要从 input 取数据, 且需要加上 inputBufOffset 表示偏移.
+            var inputBufOffset = _unhandledBufferLength;
+
             try
             {
-                if (_unhandledBufferLength > 0)
+                var preHandledBlockCount = 0;
+                if (inputBufOffset > 0 && handleBlockCount > 0)
                 {
-                    _unhandledBuffer.AsSpan(0, _unhandledBufferLength)
-                        .CopyTo(actualInput);
-                }
-        
-                input.CopyTo(actualInput[_unhandledBufferLength..]);
-
-                var blockCount = Math.Max(0, actualInput.Length / 16 - 1);
-                var requiredSpace = blockCount * 16;
-                if (output.Length < requiredSpace)
-                {
-                    throw new ArgumentException(
-                        $"The provided output array has an insufficient length (required: {blockCount * 16}, actual: {output.Length})",
-                        nameof(output));
-                }
-
-                Span<byte> inputBlock = stackalloc byte[16];
-                Span<byte> outputBlock = stackalloc byte[16];
-                try
-                {
-                    for (var i = 0; i < blockCount; i++)
+                    if (inputBufOffset >= 16)
                     {
-                        actualInput.Slice(i * 16, 16).CopyTo(inputBlock);
+                        ProcessXtsBlock(_unhandledBuffer.AsSpan(0, 16), output[..16]);
+                        preHandledBlockCount = 1;
+                        inputBufOffset -= 16;
+                    }
 
-                        ProcessXtsBlock(inputBlock, outputBlock);
-
-                        outputBlock.CopyTo(output.Slice(i * 16, 16));
+                    if (inputBufOffset > 0 && handleBlockCount - preHandledBlockCount > 0)
+                    {
+                        _unhandledBuffer.AsSpan(preHandledBlockCount * 16, inputBufOffset).CopyTo(inputBlock);
+                        input[..(16 - inputBufOffset)].CopyTo(inputBlock[inputBufOffset..]);
+                        ProcessXtsBlock(inputBlock, output.Slice(preHandledBlockCount * 16, 16));
+                        preHandledBlockCount++;
+                        inputBufOffset -= 16;
                     }
                 }
-                finally
+
+                inputBufOffset = -inputBufOffset;
+                var unhandledBlockCountInInput = handleBlockCount - preHandledBlockCount;
+                for (var i = 0; i < unhandledBlockCountInInput; i++)
                 {
-                    XtsUtils.SecureWipe(inputBlock);
-                    XtsUtils.SecureWipe(outputBlock);
+                    input.Slice(inputBufOffset + i * 16, 16).CopyTo(inputBlock);
+                    ProcessXtsBlock(inputBlock, output.Slice((preHandledBlockCount + i) * 16, 16));
                 }
 
-                var startToBufIndex = blockCount * 16;
-                XtsUtils.SecureWipe(_unhandledBuffer);
-                actualInput[startToBufIndex..].CopyTo(_unhandledBuffer);
-                _unhandledBufferLength = actualInput.Length - startToBufIndex;
+                var totalProcessedBytes = handleBlockCount * 16;
+                var newBufferLen = actualInputLength - totalProcessedBytes;
+                var inputStartIndex = inputBufOffset + unhandledBlockCountInInput * 16;
+                if (inputStartIndex >= 0 && newBufferLen > 0)
+                {
+                    input.Slice(inputStartIndex, newBufferLen).CopyTo(_unhandledBuffer);
+                }
+                else
+                {
+                    var remainingInOldBuffer = -inputStartIndex;
+                    _unhandledBuffer.AsSpan(totalProcessedBytes, remainingInOldBuffer).CopyTo(_unhandledBuffer);
+                    input.CopyTo(_unhandledBuffer.AsSpan(remainingInOldBuffer));
+                }
 
-                return blockCount * 16;
+                _unhandledBufferLength = newBufferLen;
             }
             finally
             {
-                XtsUtils.SecureWipe(actualInput);
+                XtsUtils.SecureWipe(inputBlock);
             }
+
+            return handleBlockCount * 16;
         }
 
         /// <summary>
@@ -314,19 +328,22 @@ namespace LamGC.AES_XTS
         private void ProcessXtsBlock(Span<byte> input, Span<byte> output)
         {
             var tweak = _tweakGenerator.CurrentTweak;
-        
-            try {
+
+            try
+            {
                 XtsUtils.XorBlock(input, tweak);
-                
+
                 // 加密模式已经在初始化时为 dataEncEngine 设置.
                 ProcessAesBlock(input, output);
 
                 XtsUtils.XorBlock(output, tweak);
-            } finally {
+            }
+            finally
+            {
                 _tweakGenerator.MoveNext();
             }
         }
-    
+
         public byte[] ProcessByte(byte input)
         {
             CheckState();
@@ -345,9 +362,9 @@ namespace LamGC.AES_XTS
         public int ProcessByte(byte input, Span<byte> output)
         {
             CheckState();
-        
+
             var handledBytes = ProcessBytes0(MemoryMarshal.CreateReadOnlySpan(ref input, 1), output);
-        
+
             return handledBytes;
         }
 
@@ -358,6 +375,7 @@ namespace LamGC.AES_XTS
         /// 这个值等于 2_147_483_632, 传入小于等于该长度的 input 时, 不会导致 outputBuf 长度移除导致创建失败.
         /// </remarks>
         public const int MaxInputSizeAtProcess = int.MaxValue - int.MaxValue % 16;
+
         /// <summary>
         /// 执行 DoFinal 并传入剩余数据时, 所允许的最大输入长度.
         /// </summary>
@@ -373,7 +391,7 @@ namespace LamGC.AES_XTS
         {
             CheckInput(input, 0, input.Length, isDoFinal);
         }
-    
+
         /// <summary>
         /// CheckInput 仅负责检查 输入参数是否正确, 传入数据长度是否可以安全处理, 是否会出现跨扇区问题.
         /// </summary>
@@ -391,14 +409,16 @@ namespace LamGC.AES_XTS
 
             if (input.Length - offset < length)
             {
-                throw new ArgumentOutOfRangeException(nameof(length), "The provided offset and length fall outside the bounds of the input span.");
+                throw new ArgumentOutOfRangeException(nameof(length),
+                    "The provided offset and length fall outside the bounds of the input span.");
             }
 
             if (length > (isDoFinal ? MaxInputSizeAtDoFinal : MaxInputSizeAtProcess))
             {
-                throw new ArgumentException($"The provided length ({length}) exceeds the safe range ({MaxInputSizeAtProcess}) for single processing.");
+                throw new ArgumentException(
+                    $"The provided length ({length}) exceeds the safe range ({MaxInputSizeAtProcess}) for single processing.");
             }
-        
+
             if (isDoFinal && _mode == XtsAesMode.Continuous)
             {
                 var pendingDataLength = (long)_unhandledBufferLength + length;
@@ -420,10 +440,11 @@ namespace LamGC.AES_XTS
                         finalChunkLength += 16; // 标准 CTS (e.g., 17-31 字节)
                     }
                 }
-            
+
                 var nMinus1LoopBlocks = Math.Max(0, (pendingDataLength / 16) - 1);
-                var pnMinus1BlockIndex = (CurrentBlockIndexInSector + (ulong)nMinus1LoopBlocks) % TotalBlockCountInSector;
-            
+                var pnMinus1BlockIndex =
+                    (CurrentBlockIndexInSector + (ulong)nMinus1LoopBlocks) % TotalBlockCountInSector;
+
                 if (finalChunkLength > 16 && pnMinus1BlockIndex == TotalBlockCountInSector - 1)
                 {
                     // 这就是你发现的那个“不可恢复的”跨扇区状态
@@ -434,12 +455,12 @@ namespace LamGC.AES_XTS
                 }
             }
         }
-    
+
         public byte[] ProcessBytes(byte[] input)
         {
             CheckState();
             CheckInput(input);
-        
+
             var outputBuf = new byte[GetUpdateOutputSize(input.Length)];
             ProcessBytes0(input, outputBuf);
             return outputBuf;
@@ -449,7 +470,7 @@ namespace LamGC.AES_XTS
         {
             CheckState();
             CheckInput(input, inOff, length);
-        
+
             var outputBuf = new byte[GetUpdateOutputSize(length)];
             ProcessBytes0(input.AsSpan(inOff, length), outputBuf);
             return outputBuf;
@@ -459,7 +480,7 @@ namespace LamGC.AES_XTS
         {
             CheckState();
             CheckInput(input);
-        
+
             return ProcessBytes0(input, output.AsSpan(outOff));
         }
 
@@ -467,7 +488,7 @@ namespace LamGC.AES_XTS
         {
             CheckState();
             CheckInput(input, inOff, length);
-        
+
             return ProcessBytes0(input.AsSpan(inOff, length), output.AsSpan(outOff));
         }
 
@@ -475,29 +496,29 @@ namespace LamGC.AES_XTS
         {
             CheckState();
             CheckInput(input);
-        
+
             return ProcessBytes0(input, output);
         }
-    
+
         public byte[] DoFinal()
         {
             CheckState();
             CheckInput(ReadOnlySpan<byte>.Empty, true);
-        
+
             var output = new byte[GetOutputSize(0)];
-        
+
             DoFinal(output, 0);
 
             return output;
         }
-    
+
         public byte[] DoFinal(byte[] input)
         {
             CheckState();
             CheckInput(input, true);
 
             var output = new byte[GetOutputSize(input.Length)];
-    
+
             DoFinal(input.AsSpan(), output.AsSpan());
 
             return output;
@@ -519,10 +540,10 @@ namespace LamGC.AES_XTS
         {
             CheckState();
             CheckInput(ReadOnlySpan<byte>.Empty, true);
-        
+
             // 这里不检查 output 和 outOff 是否满足输出缓冲区大小的原因是 DoFinal(Span<byte> output) 会执行检查的.
             // 考虑到调用这个方法不会处理传入新的数据, 因此不会提前检查.
-        
+
             return DoFinal(output.AsSpan(outOff));
         }
 
@@ -554,7 +575,7 @@ namespace LamGC.AES_XTS
         {
             CheckState();
             CheckInput(ReadOnlySpan<byte>.Empty, true);
-        
+
             if (output.Length < GetOutputSize(0))
             {
                 throw new ArgumentException("The provided output array is too small.", nameof(output));
@@ -565,12 +586,14 @@ namespace LamGC.AES_XTS
                 Reset();
                 return 0;
             }
+
             if (_unhandledBufferLength < 16)
             {
                 throw new ArgumentException(
                     $"XTS data unit length ({_unhandledBufferLength} bytes) " +
                     "cannot be less than 16 bytes.");
             }
+
             if (_unhandledBufferLength == 16)
             {
                 Span<byte> inputBlock = stackalloc byte[16];
@@ -596,12 +619,13 @@ namespace LamGC.AES_XTS
 
             Span<byte> pn1Block = stackalloc byte[16];
             Span<byte> pnBlock = stackalloc byte[_unhandledBufferLength - 16];
-        
+
             Span<byte> tempC = stackalloc byte[16];
             Span<byte> pnPaddedBlock = stackalloc byte[16];
 
             var finalOutputLength = _unhandledBufferLength;
-            try {
+            try
+            {
                 _unhandledBuffer.AsSpan(0, 16).CopyTo(pn1Block);
                 _unhandledBuffer.AsSpan(16, pnBlock.Length).CopyTo(pnBlock);
 
@@ -661,7 +685,7 @@ namespace LamGC.AES_XTS
                         // 拼凑 Cn-1 并解密.
                         // 这里复用 pnPaddedBlock 使其成为 Cn-1
                         pnBlock.CopyTo(pnPaddedBlock[..pnBlock.Length]);
-                    
+
                         // 到这里解密 Cn-1 得到 Pn-1.
                         XtsUtils.XorBlock(pnPaddedBlock, tweakN1);
                         ProcessAesBlock(pnPaddedBlock, cn1Output);
@@ -674,10 +698,10 @@ namespace LamGC.AES_XTS
                         XtsUtils.SecureWipe(cn1Output);
                     }
                 }
-            
+
                 Reset();
-            } 
-            finally 
+            }
+            finally
             {
                 XtsUtils.SecureWipe(pn1Block);
                 XtsUtils.SecureWipe(pnBlock);
@@ -686,7 +710,7 @@ namespace LamGC.AES_XTS
                 XtsUtils.SecureWipe(tempC);
                 XtsUtils.SecureWipe(pnPaddedBlock);
             }
-        
+
             return finalOutputLength;
         }
 
@@ -698,7 +722,8 @@ namespace LamGC.AES_XTS
             if (output.Length < GetOutputSize(input.Length))
             {
                 throw new ArgumentException($"The provided output array is too small. " +
-                                            $"(Require Buffer Size: {GetOutputSize(input.Length)}, actual buffer size: {output.Length}, unhandled buffer length: {_unhandledBufferLength})", nameof(output));
+                                            $"(Require Buffer Size: {GetOutputSize(input.Length)}, actual buffer size: {output.Length}, unhandled buffer length: {_unhandledBufferLength})",
+                    nameof(output));
             }
 
             var middleOutputLength = ProcessBytes0(input, output);
@@ -709,18 +734,19 @@ namespace LamGC.AES_XTS
         }
 
         public string AlgorithmName => "AES/XTS";
+
         public void Dispose()
         {
             if (_disposed)
             {
                 return;
             }
-        
+
             _dataEncEngine.Dispose();
-        
+
             XtsUtils.SecureWipe(_unhandledBuffer);
             _parameters = null;
-        
+
             _disposed = true;
             GC.SuppressFinalize(this);
         }

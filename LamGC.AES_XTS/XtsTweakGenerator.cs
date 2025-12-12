@@ -7,13 +7,14 @@ namespace LamGC.AES_XTS
     {
         // 128 bits
         protected const int AesBlockSize = 16;
+
         // 有限域 GF(2^128) 的乘法常量 0x87
         private const byte TweakConstant = 0x87;
-    
+
         public const ulong FastTweakMathThreshold = 2048;
 
         private readonly Aes _tweakCipher;
-    
+
         protected AbstractXtsTweakGenerator(byte[] tweakKey)
         {
             _tweakCipher = Aes.Create();
@@ -22,11 +23,19 @@ namespace LamGC.AES_XTS
             _tweakCipher.Padding = PaddingMode.None;
         }
 
+        public void Dispose()
+        {
+            _tweakCipher.Dispose();
+            _tweakCipher.Dispose();
+
+            GC.SuppressFinalize(this);
+        }
+
         protected void ProcessAesBlock(ReadOnlySpan<byte> input, Span<byte> output)
         {
-            _tweakCipher.EncryptEcb(input, output, PaddingMode.None);
+            _tweakCipher.TryEncryptEcb(input, output, PaddingMode.None, out _);
         }
-    
+
         public static void MultiplyByAlpha(Span<byte> tweak)
         {
             var overflow = (tweak[15] & 0x80) != 0;
@@ -50,7 +59,8 @@ namespace LamGC.AES_XTS
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static void MultiplyByAlphaFast(Span<byte> baseTweak, ulong blockIndex)
         {
-            var alphaCoefficient = GfPow2(blockIndex);
+            Span<byte> alphaCoefficient = stackalloc byte[AesBlockSize];
+            GfPow2(blockIndex, alphaCoefficient);
             GfMultiply(baseTweak, alphaCoefficient);
         }
 
@@ -65,7 +75,7 @@ namespace LamGC.AES_XTS
             Span<byte> tempA = stackalloc byte[AesBlockSize];
             accumulatorAndA.CopyTo(tempA);
             accumulatorAndA.Clear();
-        
+
             for (var i = 0; i < AesBlockSize; i++)
             {
                 var bByte = b[i];
@@ -75,7 +85,7 @@ namespace LamGC.AES_XTS
                     {
                         XtsUtils.XorBlock(accumulatorAndA, tempA);
                     }
-                
+
                     MultiplyByAlpha(tempA);
                 }
             }
@@ -85,14 +95,13 @@ namespace LamGC.AES_XTS
         /// 快速幂: return (alpha ^ power) mod P(x)
         /// 复杂度: O(log power)
         /// </summary>
-        public static byte[] GfPow2(ulong power)
+        public static void GfPow2(ulong power, Span<byte> result)
         {
-            var result = new byte[AesBlockSize];
             result[0] = 0x01;
 
-            var baseVal = new byte[AesBlockSize];
+            Span<byte> baseVal = stackalloc byte[AesBlockSize];
             baseVal[0] = 0x02;
-        
+
             Span<byte> baseCopy = stackalloc byte[AesBlockSize];
 
             while (power > 0)
@@ -102,35 +111,23 @@ namespace LamGC.AES_XTS
                     GfMultiply(result, baseVal);
                 }
 
-                if (power > 1) 
+                if (power > 1)
                 {
-                    new ReadOnlySpan<byte>(baseVal).CopyTo(baseCopy);
+                    baseVal.CopyTo(baseCopy);
                     GfMultiply(baseVal, baseCopy);
                 }
 
                 power >>= 1;
             }
-
-            return result;
-        }
-
-        public void Dispose()
-        {
-            _tweakCipher.Dispose();
-            _tweakCipher.Dispose();
-        
-            GC.SuppressFinalize(this);
         }
     }
 
     public class XtsTweakGenerator : AbstractXtsTweakGenerator
     {
-
         public XtsTweakGenerator(byte[] tweakCalcKey) : base(tweakCalcKey)
         {
-            
         }
-        
+
         public byte[] CalculateTweak(ulong sectorIndex, ulong blockIndex)
         {
             Span<byte> sectorIndexBytes = stackalloc byte[16];
@@ -144,7 +141,7 @@ namespace LamGC.AES_XTS
                 XtsUtils.SecureWipe(sectorIndexBytes);
             }
         }
-    
+
         /// <summary>
         /// 无状态计算 XTS 模式下指定块的 Tweak 值 (Ti = E_K2(Sector Index) * alpha^blockIndex)。
         /// </summary>
@@ -157,7 +154,7 @@ namespace LamGC.AES_XTS
             {
                 throw new ArgumentException("Sector index must be exactly 16 bytes.", nameof(sectorIndex128));
             }
-        
+
             var t0 = new byte[AesBlockSize];
             ProcessAesBlock(sectorIndex128, t0);
 
@@ -165,7 +162,7 @@ namespace LamGC.AES_XTS
             {
                 for (ulong i = 0; i < blockIndex; i++)
                 {
-                    MultiplyByAlpha(t0); 
+                    MultiplyByAlpha(t0);
                 }
             }
             else
@@ -179,20 +176,29 @@ namespace LamGC.AES_XTS
 
     public class XtsTweakStatefulGenerator : AbstractXtsTweakGenerator, IDisposable
     {
-    
+        private readonly byte[] _currentBlockTweak = new byte[AesBlockSize];
+
+        public XtsTweakStatefulGenerator(byte[] tweakCalcKey, ulong sectorSize, ulong startSectorIndex = 0,
+            ulong startBlockIndex = 0) : base(tweakCalcKey)
+        {
+            Reset(sectorSize, startSectorIndex, startBlockIndex);
+        }
+
         /// <summary>
         /// 当前 Generator 所使用的 SectorSize.
         /// </summary>
         public ulong SectorSize { get; private set; }
+
         /// <summary>
         /// 根据 SectorSize 计算得出的 Sector 内总共的加密块数量.
         /// </summary>
         public ulong TotalBlockCountInSector => (SectorSize + AesBlockSize - 1) / AesBlockSize;
-    
+
         /// <summary>
         /// 当前 Tweak 所属的 SectorIndex.
         /// </summary>
         public ulong CurrentSectorIndex { get; private set; }
+
         /// <summary>
         /// 当前 Tweak 所指向的 Sector 内的 BlockIndex.
         /// </summary>
@@ -200,18 +206,20 @@ namespace LamGC.AES_XTS
         /// DataOffsetInSector = CurrentBlockIndex * 16
         /// </remarks>
         public ulong CurrentBlockIndex { get; private set; }
-    
-        private readonly byte[] _currentBlockTweak = new byte[AesBlockSize];
+
         /// <summary>
         /// 当前 Tweak 的 Span 只读视图.
         /// </summary>
         public ReadOnlySpan<byte> CurrentTweak => _currentBlockTweak;
 
-        public XtsTweakStatefulGenerator(byte[] tweakCalcKey, ulong sectorSize, ulong startSectorIndex = 0, ulong startBlockIndex = 0) : base(tweakCalcKey)
+        public new void Dispose()
         {
-            Reset(sectorSize, startSectorIndex, startBlockIndex);
+            base.Dispose();
+            XtsUtils.SecureWipe(_currentBlockTweak);
+
+            GC.SuppressFinalize(this);
         }
-    
+
         /// <summary>
         /// 使用新的参数重置 Generator, 并初始化 CurrentTweak 为 Reset 所指定 Block 的 Tweak.
         /// </summary>
@@ -220,30 +228,31 @@ namespace LamGC.AES_XTS
         /// <param name="startBlockIndex">第一个 Tweak 从 Sector 内的第几个 Block 开始, 这也是 Reset 后 CurrentTweak 的所属 BlockIndex.</param>
         /// <exception cref="ArgumentException">当 SectorSize 小于 16 字节时抛出该异常.</exception>
         /// <exception cref="ArgumentOutOfRangeException">当指定的 StartBlockIndex 超出 SectorSize 所允许的 TotalBlock 时抛出.</exception>
-        public void Reset(ulong sectorSize, ulong startSectorIndex = 0, ulong startBlockIndex = 0) 
+        public void Reset(ulong sectorSize, ulong startSectorIndex = 0, ulong startBlockIndex = 0)
         {
             if (sectorSize < 16)
             {
                 throw new ArgumentException("The sector size must be greater than or equal to 16 bytes.");
             }
+
             SectorSize = sectorSize;
 
             if (startBlockIndex >= TotalBlockCountInSector)
             {
-                throw new ArgumentOutOfRangeException(nameof(startBlockIndex), 
+                throw new ArgumentOutOfRangeException(nameof(startBlockIndex),
                     "StartBlockIndex cannot be greater than TotalBlockCountInSector.");
             }
 
             CurrentSectorIndex = startSectorIndex;
             CurrentBlockIndex = startBlockIndex;
-        
+
             RecalculateSectorStartTweak();
             if (startBlockIndex <= FastTweakMathThreshold)
             {
                 // 由于 i 不干扰计算过程, 且能保证在不导致整数溢出的情况下减去下一次调用 GetNextTweak 的计算, 因此将 i 设置为 1 而不是 0.
                 for (ulong i = 0; i < startBlockIndex; i++)
                 {
-                    MultiplyByAlpha(_currentBlockTweak); 
+                    MultiplyByAlpha(_currentBlockTweak);
                 }
             }
             else
@@ -277,7 +286,7 @@ namespace LamGC.AES_XTS
             {
                 CurrentBlockIndex = 0;
                 CurrentSectorIndex++;
-                
+
                 RecalculateSectorStartTweak();
             }
         }
@@ -295,7 +304,7 @@ namespace LamGC.AES_XTS
             MoveNext();
             return current;
         }
-        
+
         /// <summary>
         /// 获取当前 Tweak 并使 Generator 更新并计算下一个块.
         /// </summary>
@@ -307,14 +316,6 @@ namespace LamGC.AES_XTS
         {
             CurrentTweak.CopyTo(tweakOutputBuffer);
             MoveNext();
-        }
-
-        public new void Dispose()
-        {
-            base.Dispose();
-            XtsUtils.SecureWipe(_currentBlockTweak);
-        
-            GC.SuppressFinalize(this);
         }
     }
 }
