@@ -1,0 +1,65 @@
+﻿name: Publish to NuGet
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    
+    permissions:
+      id-token: write
+      contents: read
+      checks: write
+
+    steps:
+      - uses: actions/checkout@v4
+        
+      # 1. 提取 Tag 版本并验证与 .csproj 是否一致
+      - name: Verify Version Match
+        run: |
+          TAG_VERSION=${GITHUB_REF_NAME#v}
+
+          CSPROJ_PATH="./LamGC.AES_XTS/LamGC.AES_XTS.csproj"
+          FILE_VERSION=$(grep -oPm1 "(?<=<Version>)[^<]+" "$CSPROJ_PATH")
+
+          echo "🔎 Checking versions..."
+          echo "   Git Tag:      $TAG_VERSION"
+          echo "   Csproj File:  $FILE_VERSION"
+
+          if [ "$TAG_VERSION" != "$FILE_VERSION" ]; then
+            echo "::error::❌ Version Mismatch! The Git Tag ($TAG_VERSION) does not match the version in $CSPROJ_PATH ($FILE_VERSION)."
+            exit 1
+          else
+            echo "✅ Version Match! Proceeding..."
+            echo "VERSION=$TAG_VERSION" >> $GITHUB_ENV
+          fi
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      
+      - name: Print Version
+        run: echo "Publishing version $VERSION"
+      
+      - name: Pack
+        run: dotnet pack -c Release --output ./nupkgs -p:PackageVersion=$VERSION
+
+      - name: NuGet login (OIDC → temp API key)
+        uses: NuGet/login@v1
+        id: login
+        with:
+          user: ${{ secrets.NUGET_USER }}
+      
+      # 4. 推送 (使用可信发布)
+      # 注意：即便使用了可信发布，这里仍然需要一个 API Key 的占位符或者特定的 Key。
+      # 对于 .NET CLI，目前的最佳实践是仍然使用 Secrets 存储从 NuGet 可信发布界面生成的 Key，
+      # 或者如果 NuGet 支持无 Key 推送，则省略 -k (目前标准做法仍推荐传入 Key)
+      - name: Push to NuGet
+        run: |
+          dotnet nuget push "./nupkgs/*.nupkg" \
+            --api-key ${{steps.login.outputs.NUGET_API_KEY}} \
+            --source https://api.nuget.org/v3/index.json \
+            --skip-duplicate

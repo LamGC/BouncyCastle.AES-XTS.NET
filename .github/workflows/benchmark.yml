@@ -1,0 +1,55 @@
+﻿name: Run Benchmarks
+
+on:
+  workflow_dispatch:
+
+jobs:
+  benchmark:
+    name: Benchmark on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup .NET (Multi-version)
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            6.0.x
+            7.0.x
+            8.0.x
+            9.0.x
+            10.0.x
+
+      - name: Restore dependencies
+        run: dotnet restore
+      
+      - name: Run Benchmark
+        run: |
+          dotnet run -c Release --project LamGC.AES_XTS.Benchmarks
+      
+      - name: Upload Report to Summary
+        shell: bash
+        run: |
+          REPORT_FILE=$(find ./BenchmarkDotNet.Artifacts/results -name "*-report-github.md" | head -n 1)
+          
+          if [ -z "$REPORT_FILE" ]; then
+            REPORT_FILE=$(find ./BenchmarkDotNet.Artifacts/results -name "*-report.md" | head -n 1)
+          fi
+          
+          if [ -f "$REPORT_FILE" ]; then
+            echo "## 🚀 Benchmark Results (${{ matrix.os }})" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            cat "$REPORT_FILE" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "⚠️ No benchmark report found." >> $GITHUB_STEP_SUMMARY
+          fi
+      
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results-${{ matrix.os }}
+          path: ./BenchmarkDotNet.Artifacts/results/
